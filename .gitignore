@@ -1,0 +1,14 @@
+# Node modülleri
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# Build çıktıları
+dist/
+build/
+
+# macOS
+.DS_Store
+
+# VS Code
+.vscode/
