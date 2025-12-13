@@ -31,7 +31,6 @@ function RemoteHelp() {
   // Video + WebRTC referansları
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
-  const pointerRef = useRef<HTMLDivElement | null>(null);
 
   const socketRef = useRef<Socket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -41,13 +40,27 @@ function RemoteHelp() {
   const [roomId, setRoomId] = useState(generateRoomId);
   const [isHost, setIsHost] = useState<boolean | null>(null); // true = destek alan
   const [sharing, setSharing] = useState(false);
-  const [status, setStatus] = useState<string>("Hazır. Rol seçip başlayabilirsiniz.");
+  const [status, setStatus] = useState<string>(
+    "Hazır. Rol seçip başlayabilirsiniz."
+  );
   const [error, setError] = useState<string | null>(null);
   const [localFull, setLocalFull] = useState(false);
   const [remoteFull, setRemoteFull] = useState(false);
 
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
+
+  // Kırmızı imleç için state
+  const [remotePointer, setRemotePointer] = useState<{
+    x: number;
+    y: number;
+    visible: boolean;
+  }>({
+    x: 50,
+    y: 50,
+    visible: false
+  });
+  const remotePointerTimeoutRef = useRef<number | null>(null);
 
   const mobile = isMobileBrowser();
 
@@ -66,7 +79,7 @@ function RemoteHelp() {
   // Socket.io bağlantısı + eventler
   useEffect(() => {
     const socket = io(SIGNAL_SERVER_URL, {
-      transports: ["websocket"],
+      transports: ["websocket"]
     });
 
     socketRef.current = socket;
@@ -90,7 +103,9 @@ function RemoteHelp() {
     // Geçersiz / aktif olmayan oda ID
     socket.on("room-not-found", () => {
       setStatus("Oda bulunamadı.");
-      setError("Bu ID ile aktif bir oturum bulunamadı. ID'yi kontrol edin veya müşteriden yeni ID göndermesini isteyin.");
+      setError(
+        "Bu ID ile aktif bir oturum bulunamadı. ID'yi kontrol edin veya müşteriden yeni ID göndermesini isteyin."
+      );
     });
 
     // WebRTC sinyalleşme
@@ -110,12 +125,12 @@ function RemoteHelp() {
 
             const answerData: SignalData = {
               type: "answer",
-              sdp: answer.sdp || "",
+              sdp: answer.sdp || ""
             };
 
             socket.emit("signal", {
               roomId: roomIdRef.current,
-              data: answerData,
+              data: answerData
             });
 
             setStatus("Bağlantı kuruluyor, ekran bekleniyor…");
@@ -138,15 +153,16 @@ function RemoteHelp() {
       setChatMessages((prev) => [...prev, message]);
     });
 
-    // Uzak imleç
+    // Uzak imleç: socket'ten geldiğinde göster
     socket.on("remote-pointer", ({ x, y }: { x: number; y: number }) => {
-      showPointer(x, y);
+      triggerPointer(x, y);
     });
 
     return () => {
       socket.disconnect();
       socketRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // RTCPeerConnection
@@ -154,18 +170,18 @@ function RemoteHelp() {
     if (pcRef.current) return pcRef.current;
 
     const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
     });
 
     pc.onicecandidate = (event) => {
       if (event.candidate && socketRef.current && roomIdRef.current) {
         const data: SignalData = {
           type: "candidate",
-          candidate: event.candidate.toJSON(),
+          candidate: event.candidate.toJSON()
         };
         socketRef.current.emit("signal", {
           roomId: roomIdRef.current,
-          data,
+          data
         });
       }
     };
@@ -200,7 +216,9 @@ function RemoteHelp() {
     setError(null);
 
     if (mobile) {
-      setError("Ekran paylaşımı mobil tarayıcılarda desteklenmiyor. Destek alan cihaz masaüstü olmalı.");
+      setError(
+        "Ekran paylaşımı mobil tarayıcılarda desteklenmiyor. Destek alan cihaz masaüstü olmalı."
+      );
       return;
     }
 
@@ -218,21 +236,26 @@ function RemoteHelp() {
 
     socketRef.current.emit("join-room", {
       roomId: roomIdRef.current,
-      role: "host",
+      role: "host"
     });
 
     const pc = createPeerConnection();
 
     try {
-      if (!navigator.mediaDevices || !(navigator.mediaDevices as any).getDisplayMedia) {
-        setError("Bu tarayıcı ekran paylaşımını desteklemiyor (getDisplayMedia yok).");
+      if (
+        !navigator.mediaDevices ||
+        !(navigator.mediaDevices as any).getDisplayMedia
+      ) {
+        setError(
+          "Bu tarayıcı ekran paylaşımını desteklemiyor (getDisplayMedia yok)."
+        );
         setStatus("Hata oluştu.");
         return;
       }
 
       const stream = await (navigator.mediaDevices as any).getDisplayMedia({
         video: true,
-        audio: false,
+        audio: false
       });
 
       localStreamRef.current = stream;
@@ -242,10 +265,14 @@ function RemoteHelp() {
         await localVideoRef.current.play();
       }
 
-stream.getTracks().forEach((track: MediaStreamTrack) => {
-  pc.addTrack(track, stream);
-});      setSharing(true);
-      setStatus("Ekran paylaşımı başladı. Destek veren bağlantıyı bekleyebilirsiniz.");
+      stream.getTracks().forEach((track: MediaStreamTrack) => {
+        pc.addTrack(track, stream);
+      });
+
+      setSharing(true);
+      setStatus(
+        "Ekran paylaşımı başladı. Destek veren bağlantıyı bekleyebilirsiniz."
+      );
 
       const [videoTrack] = stream.getVideoTracks();
       videoTrack.addEventListener("ended", () => {
@@ -285,7 +312,7 @@ stream.getTracks().forEach((track: MediaStreamTrack) => {
 
     socketRef.current.emit("join-room", {
       roomId: roomIdRef.current,
-      role: "viewer",
+      role: "viewer"
     });
   };
 
@@ -314,12 +341,12 @@ stream.getTracks().forEach((track: MediaStreamTrack) => {
       id: crypto.randomUUID(),
       from: isHostRef.current ? "Destek alan" : "Destek veren",
       text: chatInput.trim(),
-      ts: Date.now(),
+      ts: Date.now()
     };
 
     socketRef.current.emit("chat-message", {
       roomId: roomIdRef.current,
-      message: msg,
+      message: msg
     });
 
     setChatInput("");
@@ -332,16 +359,17 @@ stream.getTracks().forEach((track: MediaStreamTrack) => {
     }
   };
 
-  // Uzak imleç
-  const showPointer = (x: number, y: number) => {
-    const el = pointerRef.current;
-    if (!el) return;
-    el.style.left = `${x}%`;
-    el.style.top = `${y}%`;
-    el.classList.remove("pointer-visible");
-    // reflow
-    void el.offsetWidth;
-    el.classList.add("pointer-visible");
+  // Uzak imleç: tek yerden yönetilen helper
+  const triggerPointer = (x: number, y: number) => {
+    setRemotePointer({ x, y, visible: true });
+
+    if (remotePointerTimeoutRef.current !== null) {
+      window.clearTimeout(remotePointerTimeoutRef.current);
+    }
+
+    remotePointerTimeoutRef.current = window.setTimeout(() => {
+      setRemotePointer((prev) => ({ ...prev, visible: false }));
+    }, 1200); // 1.2 sn sonra kaybolsun
   };
 
   const handleRemoteScreenClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -355,10 +383,10 @@ stream.getTracks().forEach((track: MediaStreamTrack) => {
     socketRef.current.emit("remote-pointer", {
       roomId: roomIdRef.current,
       x,
-      y,
+      y
     });
 
-    showPointer(x, y);
+    triggerPointer(x, y);
   };
 
   return (
@@ -380,15 +408,17 @@ stream.getTracks().forEach((track: MediaStreamTrack) => {
             <h2 className="card-title">Nasıl Çalışır?</h2>
             <ol className="steps">
               <li>
-                <strong>Destek alan</strong>, masaüstü cihazdan bu sayfayı açar ve{" "}
-                <strong>Destek alan</strong> butonuna basıp ekranını paylaşır.
+                <strong>Destek alan</strong>, masaüstü cihazdan bu sayfayı açar
+                ve <strong>Destek alan</strong> butonuna basıp ekranını
+                paylaşır.
               </li>
               <li>
                 <strong>Destek veren</strong>, aynı Oda ID ile{" "}
                 <strong>Bu cihaz sadece izlesin</strong> butonuna basar.
               </li>
               <li>
-                Ekran otomatik olarak bağlanır; chat ve kırmızı imleç ile yönlendirme yapılabilir.
+                Ekran otomatik olarak bağlanır; chat ve kırmızı imleç ile
+                yönlendirme yapılabilir.
               </li>
             </ol>
           </div>
@@ -396,11 +426,12 @@ stream.getTracks().forEach((track: MediaStreamTrack) => {
           <div className="card">
             <h2 className="card-title">Rol Bilgisi</h2>
             <p className="role-line">
-              <span className="role-label">Destek alan:</span> Ekranını paylaşan kullanıcı (müşteri).
+              <span className="role-label">Destek alan:</span> Ekranını paylaşan
+              kullanıcı (müşteri).
             </p>
             <p className="role-line">
-              <span className="role-label">Destek veren:</span> Ekranı izleyip kullanıcıya adım adım
-              yol gösteren uzman.
+              <span className="role-label">Destek veren:</span> Ekranı izleyip
+              kullanıcıya adım adım yol gösteren uzman.
             </p>
             <p className="role-note">
               Mobil tarayıcılar ekran paylaşımını desteklemez; bu nedenle{" "}
@@ -497,9 +528,7 @@ stream.getTracks().forEach((track: MediaStreamTrack) => {
                 {localFull ? "Normal" : "Büyüt"}
               </button>
             </div>
-            <div
-              className={`screen-wrapper ${localFull ? "full" : ""}`}
-            >
+            <div className={`screen-wrapper ${localFull ? "full" : ""}`}>
               <video
                 ref={localVideoRef}
                 className="screen-video"
@@ -515,7 +544,8 @@ stream.getTracks().forEach((track: MediaStreamTrack) => {
               <div>
                 <h3>Karşı tarafın ekranı</h3>
                 <p className="screen-sub">
-                  Destek veren olarak bu alan üzerine tıklayıp kırmızı imleç ile yönlendirme yapabilirsiniz.
+                  Destek veren olarak bu alan üzerine tıklayıp kırmızı imleç ile
+                  yönlendirme yapabilirsiniz.
                 </p>
               </div>
               <button
@@ -536,7 +566,15 @@ stream.getTracks().forEach((track: MediaStreamTrack) => {
                 muted
                 playsInline
               />
-              <div ref={pointerRef} className="remote-pointer" />
+              {remotePointer.visible && (
+                <div
+                  className="remote-pointer"
+                  style={{
+                    left: `${remotePointer.x}%`,
+                    top: `${remotePointer.y}%`
+                  }}
+                />
+              )}
             </div>
           </div>
 
@@ -554,7 +592,9 @@ stream.getTracks().forEach((track: MediaStreamTrack) => {
                   <div
                     key={m.id}
                     className={`chat-message ${
-                      m.from === "Destek veren" ? "from-support" : "from-client"
+                      m.from === "Destek veren"
+                        ? "from-support"
+                        : "from-client"
                     }`}
                   >
                     <div className="chat-meta">
@@ -562,7 +602,7 @@ stream.getTracks().forEach((track: MediaStreamTrack) => {
                       <span className="chat-time">
                         {new Date(m.ts).toLocaleTimeString("tr-TR", {
                           hour: "2-digit",
-                          minute: "2-digit",
+                          minute: "2-digit"
                         })}
                       </span>
                     </div>
@@ -588,7 +628,10 @@ stream.getTracks().forEach((track: MediaStreamTrack) => {
       </main>
 
       <footer className="app-footer">
-        <span>© {new Date().getFullYear()} Uzakyardım. Sadece test ve demo amaçlıdır.</span>
+        <span>
+          © {new Date().getFullYear()} Uzakyardım. Sadece test ve demo
+          amaçlıdır.
+        </span>
       </footer>
     </div>
   );
