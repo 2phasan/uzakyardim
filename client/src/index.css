@@ -375,13 +375,26 @@ body {
   height: 260px;
 }
 
+/* Tam ekran (overlay) */
 .screen-wrapper.full {
-  height: 380px;
+  position: fixed;
+  top: 72px;
+  left: 16px;
+  right: 16px;
+  bottom: 24px;
+  height: auto;
+  z-index: 40;
+  border-width: 1px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.7);
+  background: radial-gradient(circle at top, #030718 0, #02030c 55%, #020309 100%);
 }
 
 @media (max-width: 960px) {
   .screen-wrapper.full {
-    height: 320px;
+    top: 64px;
+    left: 8px;
+    right: 8px;
+    bottom: 16px;
   }
 }
 
@@ -402,11 +415,9 @@ body {
   border: 2px solid #fb7185;
   background: rgba(248, 113, 113, 0.24);
   transform: translate(-50%, -50%) scale(0.5);
-  opacity: 0;
   pointer-events: none;
-}
-
-.remote-pointer.pointer-visible {
+  z-index: 2;
+  opacity: 1;
   animation: pointer-pop 1.2s ease-out forwards;
 }
 
