@@ -41,7 +41,7 @@ function RemoteHelp() {
   const [isHost, setIsHost] = useState<boolean | null>(null); // true = destek alan
   const [sharing, setSharing] = useState(false);
   const [status, setStatus] = useState<string>(
-    "Hazır. Rol seçip başlayabilirsiniz."
+    "Hazır. Rol seçip Oda ID ile oturumu başlatabilirsiniz."
   );
   const [error, setError] = useState<string | null>(null);
   const [localFull, setLocalFull] = useState(false);
@@ -153,7 +153,7 @@ function RemoteHelp() {
       setChatMessages((prev) => [...prev, message]);
     });
 
-    // Uzak imleç: socket'ten geldiğinde göster
+    // Uzak imleç: hem destek alan hem destek veren aynı noktayı görsün
     socket.on("remote-pointer", ({ x, y }: { x: number; y: number }) => {
       triggerPointer(x, y);
     });
@@ -271,7 +271,7 @@ function RemoteHelp() {
 
       setSharing(true);
       setStatus(
-        "Ekran paylaşımı başladı. Destek veren bağlantıyı bekleyebilirsiniz."
+        "Ekran paylaşımı başladı. Uzmanın (destek veren) bağlanmasını bekleyin."
       );
 
       const [videoTrack] = stream.getVideoTracks();
@@ -306,7 +306,7 @@ function RemoteHelp() {
     }
 
     setIsHost(false);
-    setStatus("Odaya katılmaya çalışılıyor… Bu cihaz: DESTEK VEREN");
+    setStatus("Odaya katılmaya çalışılıyor… Bu cihaz: DESTEK VEREN (uzman)");
 
     createPeerConnection();
 
@@ -373,19 +373,22 @@ function RemoteHelp() {
   };
 
   const handleRemoteScreenClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Sadece DESTEK VEREN tıklayınca kırmızı imleç gönderebilsin
     if (!socketRef.current || !roomIdRef.current) return;
-    if (isHostRef.current) return; // sadece DESTEK VEREN tıklayabilir
+    if (isHostRef.current) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 100;
     const y = ((e.clientY - rect.top) / rect.height) * 100;
 
+    // Herkese bildir
     socketRef.current.emit("remote-pointer", {
       roomId: roomIdRef.current,
       x,
       y
     });
 
+    // Anında kendi ekranında da göster
     triggerPointer(x, y);
   };
 
@@ -403,22 +406,25 @@ function RemoteHelp() {
       </header>
 
       <main className="app-main">
+        {/* SOL: Açıklama alanı */}
         <section className="info-column">
           <div className="card">
-            <h2 className="card-title">Nasıl Çalışır?</h2>
+            <h2 className="card-title">3 Adımda Destek</h2>
             <ol className="steps">
               <li>
-                <strong>Destek alan</strong>, masaüstü cihazdan bu sayfayı açar
-                ve <strong>Destek alan</strong> butonuna basıp ekranını
-                paylaşır.
+                <strong>Ekranını paylaşacak kişi</strong> (müşteri) masaüstünden
+                bu siteyi açar ve{" "}
+                <strong>&quot;Ekranımı paylaş (müşteri)&quot;</strong>{" "}
+                butonuna basar.
               </li>
               <li>
-                <strong>Destek veren</strong>, aynı Oda ID ile{" "}
-                <strong>Bu cihaz sadece izlesin</strong> butonuna basar.
+                <strong>Uzman</strong> aynı Oda ID&apos;yi girip{" "}
+                <strong>&quot;Bu cihaz izlesin (uzman)&quot;</strong>{" "}
+                butonuna basar.
               </li>
               <li>
-                Ekran otomatik olarak bağlanır; chat ve kırmızı imleç ile
-                yönlendirme yapılabilir.
+                Ekran bağlandıktan sonra chat ve kırmızı imleç ile adım adım
+                yönlendirme yapılır.
               </li>
             </ol>
           </div>
@@ -426,16 +432,18 @@ function RemoteHelp() {
           <div className="card">
             <h2 className="card-title">Rol Bilgisi</h2>
             <p className="role-line">
-              <span className="role-label">Destek alan:</span> Ekranını paylaşan
-              kullanıcı (müşteri).
+              <span className="role-label">Müşteri (Destek alan):</span>{" "}
+              Ekranını paylaşan kişi.
             </p>
             <p className="role-line">
-              <span className="role-label">Destek veren:</span> Ekranı izleyip
-              kullanıcıya adım adım yol gösteren uzman.
+              <span className="role-label">Uzman (Destek veren):</span>{" "}
+              Ekranı izleyip kullanıcıya yol gösteren kişi.
             </p>
             <p className="role-note">
-              Mobil tarayıcılar ekran paylaşımını desteklemez; bu nedenle{" "}
-              <strong>destek alan cihazın masaüstü</strong> olması gerekir.
+              Ekran paylaşımı için{" "}
+              <strong>masaüstü tarayıcı (Chrome, Edge, Safari)</strong>{" "}
+              kullanılmalıdır. Mobil tarayıcılar ekran paylaşımını
+              desteklemez.
             </p>
           </div>
 
@@ -447,24 +455,27 @@ function RemoteHelp() {
                 <span className="room-meta-value">#{roomId}</span>
               </div>
               <div className="room-meta-item">
-                <span className="room-meta-label">Cihaz Rolü</span>
+                <span className="room-meta-label">Bu cihazın rolü</span>
                 <span className="room-meta-value">
                   {isHost === null
-                    ? "ROL SEÇİLMEDİ"
+                    ? "Henüz seçilmedi"
                     : isHost
-                    ? "Bu cihaz: DESTEK ALAN"
-                    : "Bu cihaz: DESTEK VEREN"}
+                    ? "Müşteri (ekran paylaşan)"
+                    : "Uzman (izleyen)"}
                 </span>
               </div>
             </div>
             <p className="room-tip">
-              Müşterinle aynı ID'yi kullanmanız gerekir. İstersen{" "}
-              <strong>Yeni ID</strong> ile her oturumda farklı kod üret.
+              Her iki taraf da{" "}
+              <strong>AYNI Oda ID&apos;yi</strong> kullanmalıdır. İstersen her
+              oturum öncesi <strong>Yeni ID</strong> oluşturabilirsin.
             </p>
           </div>
         </section>
 
+        {/* SAĞ: Kontroller + ekranlar + chat */}
         <section className="main-column">
+          {/* Oda & rol seçimi */}
           <div className="card">
             <div className="room-controls">
               <div className="room-id-group">
@@ -491,13 +502,13 @@ function RemoteHelp() {
                 onClick={startHost}
                 disabled={sharing || mobile}
               >
-                Destek alan (masaüstü)
+                Ekranımı paylaş (müşteri)
               </button>
               <button
                 className={`btn secondary ${isHost === false ? "active" : ""}`}
                 onClick={startViewer}
               >
-                Bu cihaz sadece izlesin (destek veren)
+                Bu cihaz izlesin (uzman)
               </button>
             </div>
 
@@ -513,19 +524,20 @@ function RemoteHelp() {
             )}
           </div>
 
+          {/* Bu cihazın ekranı */}
           <div className="card">
             <div className="screen-header">
               <div>
                 <h3>Bu cihazın ekranı</h3>
                 <p className="screen-sub">
-                  Host olduğunuzda ekranınız burada görünür.
+                  Müşteri olarak ekran paylaştığınızda, önizleme burada görünür.
                 </p>
               </div>
               <button
                 className="link-button"
                 onClick={() => setLocalFull((v) => !v)}
               >
-                {localFull ? "Normal" : "Büyüt"}
+                {localFull ? "Normal görünüm" : "Büyüt"}
               </button>
             </div>
             <div className={`screen-wrapper ${localFull ? "full" : ""}`}>
@@ -536,15 +548,26 @@ function RemoteHelp() {
                 muted
                 playsInline
               />
+              {/* İmleci hem burada hem remote ekranda gösterebiliriz */}
+              {remotePointer.visible && (
+                <div
+                  className="remote-pointer"
+                  style={{
+                    left: `${remotePointer.x}%`,
+                    top: `${remotePointer.y}%`
+                  }}
+                />
+              )}
             </div>
           </div>
 
+          {/* Karşı tarafın ekranı */}
           <div className="card">
             <div className="screen-header">
               <div>
                 <h3>Karşı tarafın ekranı</h3>
                 <p className="screen-sub">
-                  Destek veren olarak bu alan üzerine tıklayıp kırmızı imleç ile
+                  Uzman olarak bu alan üzerine tıklayıp kırmızı imleç ile
                   yönlendirme yapabilirsiniz.
                 </p>
               </div>
@@ -552,7 +575,7 @@ function RemoteHelp() {
                 className="link-button"
                 onClick={() => setRemoteFull((v) => !v)}
               >
-                {remoteFull ? "Normal" : "Büyüt"}
+                {remoteFull ? "Normal görünüm" : "Büyüt"}
               </button>
             </div>
             <div
@@ -578,6 +601,7 @@ function RemoteHelp() {
             </div>
           </div>
 
+          {/* Chat */}
           <div className="card chat-card">
             <h3>Canlı Chat</h3>
             <div className="chat-box">
@@ -629,7 +653,7 @@ function RemoteHelp() {
 
       <footer className="app-footer">
         <span>
-          © {new Date().getFullYear()} Uzakyardım. Sadece test ve demo
+          © {new Date().getFullYear()} Uzakyardım — Sadece test ve demo
           amaçlıdır.
         </span>
       </footer>
