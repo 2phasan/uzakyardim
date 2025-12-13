@@ -79,7 +79,7 @@ const RemoteHelp: React.FC = () => {
 
   // Socket.io bağlantısı
   useEffect(() => {
-    const url = `http://${window.location.hostname}:3000`;
+   const url = "https://uzakyardim.onrender.com"; // buraya KENDI URL’INI yaz
     const socket = io(url);
     socketRef.current = socket;
 
