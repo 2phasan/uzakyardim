@@ -1,5 +1,5 @@
 // client/src/RemoteHelp.tsx
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 
 type SignalData =
@@ -8,83 +8,92 @@ type SignalData =
   | { type: "candidate"; candidate: RTCIceCandidateInit };
 
 type ChatMessage = {
-  id: number;
-  from: "HOST" | "VIEWER";
+  id: string;
+  from: "Destek alan" | "Destek veren" | "Sistem";
   text: string;
+  ts: number;
 };
 
-type PointerData = {
-  x: number; // 0–1 arası
-  y: number;
+const SIGNAL_SERVER_URL =
+  import.meta.env.VITE_SIGNAL_SERVER_URL ||
+  "https://uzakyardim.onrender.com";
+
+const isMobileBrowser = () => {
+  const ua = navigator.userAgent.toLowerCase();
+  return /iphone|ipad|android/i.test(ua);
 };
 
-const createRandomRoomId = () =>
-  Math.floor(100000 + Math.random() * 900000).toString();
+function generateRoomId() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
 
-const RemoteHelp: React.FC = () => {
+function RemoteHelp() {
+  // Video + WebRTC referansları
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const pointerRef = useRef<HTMLDivElement | null>(null);
 
   const socketRef = useRef<Socket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
 
-  const [roomId, setRoomId] = useState<string>(createRandomRoomId());
-  const [role, setRole] = useState<"HOST" | "VIEWER" | null>(null);
+  // State
+  const [roomId, setRoomId] = useState(generateRoomId);
+  const [isHost, setIsHost] = useState<boolean | null>(null); // true = destek alan
   const [sharing, setSharing] = useState(false);
-  const [status, setStatus] = useState<string>(
-    "Oda ID oluşturun veya hazır ID ile devam edin."
-  );
+  const [status, setStatus] = useState<string>("Hazır. Rol seçip başlayabilirsiniz.");
   const [error, setError] = useState<string | null>(null);
+  const [localFull, setLocalFull] = useState(false);
+  const [remoteFull, setRemoteFull] = useState(false);
 
-  const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const nextChatIdRef = useRef(1);
+  const [chatInput, setChatInput] = useState("");
 
-  const [remotePointer, setRemotePointer] = useState<PointerData | null>(null);
-  const [enlarged, setEnlarged] = useState<"LOCAL" | "REMOTE" | "NONE">(
-    "NONE"
-  );
+  const mobile = isMobileBrowser();
 
+  // fresh değerler için ref
   const roomIdRef = useRef(roomId);
-  const roleRef = useRef<"HOST" | "VIEWER" | null>(null);
+  const isHostRef = useRef(false);
 
   useEffect(() => {
     roomIdRef.current = roomId;
   }, [roomId]);
 
   useEffect(() => {
-    roleRef.current = role;
-  }, [role]);
+    isHostRef.current = !!isHost;
+  }, [isHost]);
 
-  // Mobil tespiti (host için engelleme mesajı göstereceğiz)
-  const [isMobile] = useState(() => {
-    if (typeof navigator === "undefined") return false;
-    const ua = navigator.userAgent || "";
-    const isAndroid = /Android/i.test(ua);
-    const isiOS = /iPhone|iPad|iPod/i.test(ua);
-    return isAndroid || isiOS;
-  });
-
-  // Socket.io bağlantısı
+  // Socket.io bağlantısı + eventler
   useEffect(() => {
-    const url = "https://uzakyardim.onrender.com"; // Render’daki server adresin
-    const socket = io(url, {
-      transports: ["websocket", "polling"]
+    const socket = io(SIGNAL_SERVER_URL, {
+      transports: ["websocket"],
     });
+
     socketRef.current = socket;
 
     socket.on("connect", () => {
-      setStatus("Signaling sunucusuna bağlanıldı.");
+      setStatus("Sinyal sunucusuna bağlanıldı.");
+      setError(null);
+    });
+
+    socket.on("disconnect", () => {
+      setStatus("Sunucu bağlantısı koptu.");
     });
 
     socket.on("user-joined", async () => {
-      if (roleRef.current === "HOST" && pcRef.current && localStreamRef.current) {
-        setStatus("Yeni kullanıcı için bağlantı oluşturuluyor...");
+      // Odaya yeni kullanıcı katıldı → host isek offer gönder
+      if (isHostRef.current && pcRef.current && localStreamRef.current) {
         await sendOffer();
       }
     });
 
+    // Geçersiz / aktif olmayan oda ID
+    socket.on("room-not-found", () => {
+      setStatus("Oda bulunamadı.");
+      setError("Bu ID ile aktif bir oturum bulunamadı. ID'yi kontrol edin veya müşteriden yeni ID göndermesini isteyin.");
+    });
+
+    // WebRTC sinyalleşme
     socket.on(
       "signal",
       async ({ data }: { from: string; data: SignalData }) => {
@@ -92,7 +101,7 @@ const RemoteHelp: React.FC = () => {
         if (!pc) return;
 
         try {
-          if (data.type === "offer" && roleRef.current === "VIEWER") {
+          if (data.type === "offer" && !isHostRef.current) {
             await pc.setRemoteDescription(
               new RTCSessionDescription({ type: "offer", sdp: data.sdp })
             );
@@ -101,52 +110,37 @@ const RemoteHelp: React.FC = () => {
 
             const answerData: SignalData = {
               type: "answer",
-              sdp: answer.sdp!
+              sdp: answer.sdp || "",
             };
+
             socket.emit("signal", {
               roomId: roomIdRef.current,
-              data: answerData
+              data: answerData,
             });
 
-            setStatus("Bağlantı isteği alındı, yanıt gönderildi.");
-          } else if (data.type === "answer" && roleRef.current === "HOST") {
+            setStatus("Bağlantı kuruluyor, ekran bekleniyor…");
+          } else if (data.type === "answer" && isHostRef.current) {
             await pc.setRemoteDescription(
               new RTCSessionDescription({ type: "answer", sdp: data.sdp })
             );
-            setStatus("Görüntü bağlantısı kuruldu.");
+            setStatus("Bağlantı kuruldu.");
           } else if (data.type === "candidate" && data.candidate) {
             await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
           }
-        } catch (err) {
-          console.error("Signal işlenirken hata:", err);
-          setError("Bağlantı kurulurken bir hata oluştu.");
+        } catch (e) {
+          console.error("Signal işlenirken hata:", e);
         }
       }
     );
 
-    // Pointer
-    socket.on("pointer", (data: PointerData) => {
-      setRemotePointer(data);
-      setTimeout(() => setRemotePointer(null), 1200);
+    // Chat mesajları
+    socket.on("chat-message", (message: ChatMessage) => {
+      setChatMessages((prev) => [...prev, message]);
     });
 
-    // Chat
-    socket.on(
-      "chat-message",
-      ({ text, role: fromRole }: { text: string; role: "HOST" | "VIEWER" }) => {
-        setChatMessages((prev) => [
-          ...prev,
-          {
-            id: nextChatIdRef.current++,
-            from: fromRole,
-            text
-          }
-        ]);
-      }
-    );
-
-    socket.on("disconnect", () => {
-      setStatus("Signaling sunucusuyla bağlantı koptu.");
+    // Uzak imleç
+    socket.on("remote-pointer", ({ x, y }: { x: number; y: number }) => {
+      showPointer(x, y);
     });
 
     return () => {
@@ -155,22 +149,23 @@ const RemoteHelp: React.FC = () => {
     };
   }, []);
 
+  // RTCPeerConnection
   const createPeerConnection = () => {
     if (pcRef.current) return pcRef.current;
 
     const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
 
     pc.onicecandidate = (event) => {
       if (event.candidate && socketRef.current && roomIdRef.current) {
         const data: SignalData = {
           type: "candidate",
-          candidate: event.candidate.toJSON()
+          candidate: event.candidate.toJSON(),
         };
         socketRef.current.emit("signal", {
           roomId: roomIdRef.current,
-          data
+          data,
         });
       }
     };
@@ -187,81 +182,75 @@ const RemoteHelp: React.FC = () => {
 
   const sendOffer = async () => {
     if (!socketRef.current || !pcRef.current || !roomIdRef.current) return;
-
     const pc = pcRef.current;
-    setStatus("Bağlantı isteği hazırlanıyor...");
+
+    setStatus("Bağlantı başlatılıyor…");
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
 
-    const data: SignalData = { type: "offer", sdp: offer.sdp! };
+    const data: SignalData = { type: "offer", sdp: offer.sdp || "" };
     socketRef.current.emit("signal", { roomId: roomIdRef.current, data });
 
-    setStatus("Bağlantı isteği gönderildi, yanıt bekleniyor...");
+    setStatus("Karşı tarafın cevap vermesi bekleniyor…");
   };
 
-  // Host (destek alan)
+  // Host (destek alan) başlat
   const startHost = async () => {
     setError(null);
 
-    if (!roomId.trim()) {
-      setError("Önce geçerli bir Oda ID girin.");
+    if (mobile) {
+      setError("Ekran paylaşımı mobil tarayıcılarda desteklenmiyor. Destek alan cihaz masaüstü olmalı.");
+      return;
+    }
+
+    if (!roomIdRef.current.trim()) {
+      setError("Önce geçerli bir Oda ID olmalı.");
       return;
     }
     if (!socketRef.current) {
-      setError("Signaling sunucusuna bağlanılamadı.");
+      setError("Sinyal sunucusuna bağlanılamadı.");
       return;
     }
 
-    if (isMobile) {
-      setError(
-        "Mobil tarayıcılar ekran paylaşımını desteklemez. Destek alan cihazın masaüstü (Mac/Windows) olması gerekir."
-      );
-      setStatus("Host modu bu cihazda kullanılamıyor (mobil).");
-      return;
-    }
+    setIsHost(true);
+    setStatus("Oda oluşturuluyor ve ekran paylaşımı hazırlanıyor…");
 
-    setRole("HOST");
-    setStatus("Odaya katılınıyor (destek alan)...");
-    createPeerConnection();
-    socketRef.current.emit("join-room", roomId);
+    socketRef.current.emit("join-room", {
+      roomId: roomIdRef.current,
+      role: "host",
+    });
 
-    const pc = pcRef.current!;
+    const pc = createPeerConnection();
+
     try {
-      if (
-        !(
-          navigator.mediaDevices &&
-          (navigator.mediaDevices as any).getDisplayMedia
-        )
-      ) {
-        throw new Error(
-          "Bu tarayıcı ekran paylaşımını (getDisplayMedia) desteklemiyor."
-        );
+      if (!navigator.mediaDevices || !(navigator.mediaDevices as any).getDisplayMedia) {
+        setError("Bu tarayıcı ekran paylaşımını desteklemiyor (getDisplayMedia yok).");
+        setStatus("Hata oluştu.");
+        return;
       }
 
-      const stream: MediaStream = await (navigator.mediaDevices as any)
-        .getDisplayMedia({
-          video: true,
-          audio: false
-        });
+      const stream = await (navigator.mediaDevices as any).getDisplayMedia({
+        video: true,
+        audio: false,
+      });
 
       localStreamRef.current = stream;
 
       if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
+        localVideoRef.current.srcObject = stream as MediaStream;
         await localVideoRef.current.play();
       }
 
-      stream.getTracks().forEach((track: MediaStreamTrack) =>
-        pc.addTrack(track, stream)
-      );
-      setSharing(true);
-      setStatus("Ekran paylaşımı başladı. Destek veren bağlanabilir.");
+stream.getTracks().forEach((track: MediaStreamTrack) => {
+  pc.addTrack(track, stream);
+});      setSharing(true);
+      setStatus("Ekran paylaşımı başladı. Destek veren bağlantıyı bekleyebilirsiniz.");
 
       const [videoTrack] = stream.getVideoTracks();
       videoTrack.addEventListener("ended", () => {
         setSharing(false);
-        setStatus("Ekran paylaşımı sonlandırıldı.");
+        setStatus("Ekran paylaşımı durdu.");
         localStreamRef.current = null;
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = null;
@@ -276,58 +265,61 @@ const RemoteHelp: React.FC = () => {
     }
   };
 
-  // Viewer (destek veren)
+  // Viewer (destek veren) başlat
   const startViewer = () => {
     setError(null);
 
-    if (!roomId.trim()) {
-      setError("Önce geçerli bir Oda ID girin.");
+    if (!roomIdRef.current.trim()) {
+      setError("Önce Oda ID gir.");
       return;
     }
     if (!socketRef.current) {
-      setError("Signaling sunucusuna bağlanılamadı.");
+      setError("Sinyal sunucusuna bağlanılamadı.");
       return;
     }
 
-    setRole("VIEWER");
-    setStatus("Odaya katılınıyor (destek veren)...");
+    setIsHost(false);
+    setStatus("Odaya katılmaya çalışılıyor… Bu cihaz: DESTEK VEREN");
+
     createPeerConnection();
-    socketRef.current.emit("join-room", roomId);
+
+    socketRef.current.emit("join-room", {
+      roomId: roomIdRef.current,
+      role: "viewer",
+    });
   };
 
-  const handleNewRoomId = () => {
-    const newId = createRandomRoomId();
-    setRoomId(newId);
-    setStatus("Yeni oturum ID oluşturuldu. Bu ID’yi karşı tarafla paylaşın.");
-    setRole(null);
-    setRemotePointer(null);
-    setChatMessages([]);
+  // Yeni ID üret
+  const handleNewId = () => {
+    const id = generateRoomId();
+    setRoomId(id);
+    setError(null);
+    setStatus("Yeni ID oluşturuldu. Bu ID'yi müşterinle paylaş.");
   };
 
-  const handleCopyRoomId = async () => {
+  const handleCopyId = async () => {
     try {
       await navigator.clipboard.writeText(roomId);
       setStatus("Oda ID panoya kopyalandı.");
     } catch {
-      setError("Panoya kopyalanamadı, ID’yi elle kopyalayın.");
+      setError("ID kopyalanamadı, elle seçip kopyalayın.");
     }
   };
 
-  const sendChat = () => {
-    if (!chatInput.trim() || !socketRef.current || !roomIdRef.current) return;
+  // Chat gönder
+  const sendChatMessage = () => {
+    if (!socketRef.current || !roomIdRef.current || !chatInput.trim()) return;
 
-    const text = chatInput.trim();
-    const fromRole = roleRef.current ?? "VIEWER";
-
-    setChatMessages((prev) => [
-      ...prev,
-      { id: nextChatIdRef.current++, from: fromRole, text }
-    ]);
+    const msg: ChatMessage = {
+      id: crypto.randomUUID(),
+      from: isHostRef.current ? "Destek alan" : "Destek veren",
+      text: chatInput.trim(),
+      ts: Date.now(),
+    };
 
     socketRef.current.emit("chat-message", {
       roomId: roomIdRef.current,
-      text,
-      role: fromRole
+      message: msg,
     });
 
     setChatInput("");
@@ -336,302 +328,270 @@ const RemoteHelp: React.FC = () => {
   const handleChatKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       e.preventDefault();
-      sendChat();
+      sendChatMessage();
     }
   };
 
-  const handleRemoteClick = (
-    e: React.MouseEvent<HTMLDivElement, MouseEvent>
-  ) => {
-    if (!socketRef.current || !roomIdRef.current) return;
-
-    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const y = (e.clientY - rect.top) / rect.height;
-
-    socketRef.current.emit("pointer", {
-      roomId: roomIdRef.current,
-      x,
-      y
-    });
+  // Uzak imleç
+  const showPointer = (x: number, y: number) => {
+    const el = pointerRef.current;
+    if (!el) return;
+    el.style.left = `${x}%`;
+    el.style.top = `${y}%`;
+    el.classList.remove("pointer-visible");
+    // reflow
+    void el.offsetWidth;
+    el.classList.add("pointer-visible");
   };
 
-  const roleLabel =
-    role === "HOST"
-      ? "Bu cihaz: DESTEK ALAN"
-      : role === "VIEWER"
-      ? "Bu cihaz: DESTEK VEREN"
-      : "Bu cihaz: ROL SEÇİLMEDİ";
+  const handleRemoteScreenClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!socketRef.current || !roomIdRef.current) return;
+    if (isHostRef.current) return; // sadece DESTEK VEREN tıklayabilir
 
-  const isLocalBig = enlarged === "LOCAL";
-  const isRemoteBig = enlarged === "REMOTE";
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+
+    socketRef.current.emit("remote-pointer", {
+      roomId: roomIdRef.current,
+      x,
+      y,
+    });
+
+    showPointer(x, y);
+  };
 
   return (
-    <div className="app-shell">
-      {/* HEADER */}
+    <div className="app-root">
       <header className="app-header">
-        <div className="app-logo">
-          <div className="logo-mark">U</div>
-          <div className="logo-text">
-            <span className="logo-title">uzakyardim</span>
-            <span className="logo-subtitle">Kurumsal Ekran Destek Platformu</span>
+        <div className="brand">
+          <div className="brand-logo">U</div>
+          <div className="brand-text">
+            <div className="brand-name">UZAKYARDIM</div>
+            <div className="brand-sub">Kurumsal Ekran Destek Platformu</div>
           </div>
         </div>
-        <div className="header-right">
-          <span className="header-badge">Beta</span>
-        </div>
+        <div className="header-badge">BETA</div>
       </header>
 
-      {/* MAIN */}
       <main className="app-main">
-        {/* SOL PANEL: Bilgi & Durum */}
-        <section className="info-panel">
-          <div className="info-card">
-            <h2>Nasıl Çalışır?</h2>
-            <ol>
+        <section className="info-column">
+          <div className="card">
+            <h2 className="card-title">Nasıl Çalışır?</h2>
+            <ol className="steps">
               <li>
-                <strong>1.</strong> Destek alan, masaüstü cihazdan bu sayfayı
-                açar, <strong>Destek alan</strong> butonuna basıp ekranını
-                paylaşır.
+                <strong>Destek alan</strong>, masaüstü cihazdan bu sayfayı açar ve{" "}
+                <strong>Destek alan</strong> butonuna basıp ekranını paylaşır.
               </li>
               <li>
-                <strong>2.</strong> Destek veren, aynı Oda ID ile{" "}
+                <strong>Destek veren</strong>, aynı Oda ID ile{" "}
                 <strong>Bu cihaz sadece izlesin</strong> butonuna basar.
               </li>
               <li>
-                <strong>3.</strong> Ekran otomatik olarak bağlanır; chat ve
-                kırmızı imleç ile yönlendirme yapılabilir.
+                Ekran otomatik olarak bağlanır; chat ve kırmızı imleç ile yönlendirme yapılabilir.
               </li>
             </ol>
           </div>
 
-          <div className="info-card">
-            <h2>Rol Bilgisi</h2>
-            <p>
-              <strong>Destek alan:</strong> Ekranını paylaşan, genellikle müşteri
-              veya son kullanıcı.
-              <br />
-              <strong>Destek veren:</strong> Ekranı izleyip kullanıcıya adım
-              adım yol gösteren uzman.
+          <div className="card">
+            <h2 className="card-title">Rol Bilgisi</h2>
+            <p className="role-line">
+              <span className="role-label">Destek alan:</span> Ekranını paylaşan kullanıcı (müşteri).
             </p>
-            <p className="info-note">
+            <p className="role-line">
+              <span className="role-label">Destek veren:</span> Ekranı izleyip kullanıcıya adım adım
+              yol gösteren uzman.
+            </p>
+            <p className="role-note">
               Mobil tarayıcılar ekran paylaşımını desteklemez; bu nedenle{" "}
               <strong>destek alan cihazın masaüstü</strong> olması gerekir.
             </p>
           </div>
 
-          <div className="status-card">
-            <div className="status-row">
-              <span className="status-label">Oda ID</span>
-              <span className="status-value">{roomId}</span>
-            </div>
-            <div className="status-row">
-              <span className="status-label">Cihaz Rolü</span>
-              <span className="status-value">{roleLabel}</span>
-            </div>
-            <div className="status-row">
-              <span className="status-label">Durum</span>
-              <span className="status-value status-value--accent">
-                {status}
-              </span>
-            </div>
-            {error && (
-              <div className="status-error">
-                <strong>Hata:</strong> {error}
+          <div className="card small">
+            <h2 className="card-title">Oda Bilgisi</h2>
+            <div className="room-meta">
+              <div className="room-meta-item">
+                <span className="room-meta-label">Oda ID</span>
+                <span className="room-meta-value">#{roomId}</span>
               </div>
-            )}
+              <div className="room-meta-item">
+                <span className="room-meta-label">Cihaz Rolü</span>
+                <span className="room-meta-value">
+                  {isHost === null
+                    ? "ROL SEÇİLMEDİ"
+                    : isHost
+                    ? "Bu cihaz: DESTEK ALAN"
+                    : "Bu cihaz: DESTEK VEREN"}
+                </span>
+              </div>
+            </div>
+            <p className="room-tip">
+              Müşterinle aynı ID'yi kullanmanız gerekir. İstersen{" "}
+              <strong>Yeni ID</strong> ile her oturumda farklı kod üret.
+            </p>
           </div>
         </section>
 
-        {/* SAĞ PANEL: Kontroller + Video + Chat */}
-        <section className="session-panel">
-          {/* ODA / ROL KONTROLLERİ */}
-          <div className="card controls-card">
-            <div className="controls-row">
-              <label className="field">
-                <span className="field-label">Oda ID</span>
+        <section className="main-column">
+          <div className="card">
+            <div className="room-controls">
+              <div className="room-id-group">
+                <label className="field-label">Oda ID</label>
                 <input
+                  className="room-input"
                   value={roomId}
                   onChange={(e) => setRoomId(e.target.value)}
-                  className="field-input"
                 />
-              </label>
-
-              <button className="btn-secondary" onClick={handleNewRoomId}>
-                Yeni ID
-              </button>
-              <button className="btn-secondary" onClick={handleCopyRoomId}>
-                ID&apos;yi kopyala
-              </button>
+              </div>
+              <div className="room-actions">
+                <button className="btn ghost" onClick={handleNewId}>
+                  Yeni ID
+                </button>
+                <button className="btn ghost" onClick={handleCopyId}>
+                  ID&apos;yi kopyala
+                </button>
+              </div>
             </div>
 
-            <div className="controls-row controls-row--buttons">
-              <button className="btn-primary" onClick={startHost}>
+            <div className="role-buttons">
+              <button
+                className={`btn primary ${isHost === true ? "active" : ""}`}
+                onClick={startHost}
+                disabled={sharing || mobile}
+              >
                 Destek alan (masaüstü)
               </button>
-              <button className="btn-ghost" onClick={startViewer}>
+              <button
+                className={`btn secondary ${isHost === false ? "active" : ""}`}
+                onClick={startViewer}
+              >
                 Bu cihaz sadece izlesin (destek veren)
               </button>
             </div>
 
-            {isMobile && (
-              <p className="mobile-warning">
-                Bu cihaz mobil olarak algılandı. Bu cihazda{" "}
-                <strong>sadece destek veren</strong> rolü kullanılmalıdır.
-              </p>
+            <div className="status-line">
+              <span className="status-label">Durum:</span>
+              <span className="status-text">{status}</span>
+            </div>
+
+            {error && (
+              <div className="error-banner">
+                <span className="error-label">Hata:</span> {error}
+              </div>
             )}
           </div>
 
-          {/* VİDEO ALANI */}
-          <div className="card video-card">
-            <div className="video-grid">
-              {/* LOCAL */}
-              <div
-                className={
-                  enlarged === "REMOTE" ? "video-block video-block--hidden" : "video-block"
-                }
-              >
-                <div className="video-header">
-                  <div>
-                    <h3>Bu cihazın ekranı</h3>
-                    <span className="video-caption">
-                      {sharing
-                        ? "Ekran paylaşılıyor."
-                        : "Host olduğunuzda ekranınız burada görünür."}
-                    </span>
-                  </div>
-                  <button
-                    className="chip"
-                    onClick={() =>
-                      setEnlarged((prev) =>
-                        prev === "LOCAL" ? "NONE" : "LOCAL"
-                      )
-                    }
-                  >
-                    {isLocalBig ? "Küçült" : "Büyüt"}
-                  </button>
-                </div>
-                <video
-                  ref={localVideoRef}
-                  className="video-element"
-                  autoPlay
-                  muted
-                  playsInline
-                />
+          <div className="card">
+            <div className="screen-header">
+              <div>
+                <h3>Bu cihazın ekranı</h3>
+                <p className="screen-sub">
+                  Host olduğunuzda ekranınız burada görünür.
+                </p>
               </div>
-
-              {/* REMOTE */}
-              <div
-                className={
-                  enlarged === "LOCAL" ? "video-block video-block--hidden" : "video-block"
-                }
+              <button
+                className="link-button"
+                onClick={() => setLocalFull((v) => !v)}
               >
-                <div className="video-header">
-                  <div>
-                    <h3>Karşı tarafın ekranı</h3>
-                    <span className="video-caption">
-                      Destek veren olarak bu alan üzerinden imleç ile yönlendirme
-                      yapabilirsiniz.
-                    </span>
-                  </div>
-                  <button
-                    className="chip"
-                    onClick={() =>
-                      setEnlarged((prev) =>
-                        prev === "REMOTE" ? "NONE" : "REMOTE"
-                      )
-                    }
-                  >
-                    {isRemoteBig ? "Küçült" : "Büyüt"}
-                  </button>
-                </div>
-
-                <div
-                  className={
-                    role === "VIEWER"
-                      ? "video-remote-wrapper video-remote-wrapper--clickable"
-                      : "video-remote-wrapper"
-                  }
-                  onClick={role === "VIEWER" ? handleRemoteClick : undefined}
-                >
-                  <video
-                    ref={remoteVideoRef}
-                    className="video-element"
-                    autoPlay
-                    muted
-                    playsInline
-                  />
-                  {remotePointer && (
-                    <div
-                      className="remote-pointer"
-                      style={{
-                        left: `${remotePointer.x * 100}%`,
-                        top: `${remotePointer.y * 100}%`
-                      }}
-                    />
-                  )}
-                </div>
-              </div>
+                {localFull ? "Normal" : "Büyüt"}
+              </button>
+            </div>
+            <div
+              className={`screen-wrapper ${localFull ? "full" : ""}`}
+            >
+              <video
+                ref={localVideoRef}
+                className="screen-video"
+                autoPlay
+                muted
+                playsInline
+              />
             </div>
           </div>
 
-          {/* CHAT */}
-          <div className="card chat-card">
-            <div className="chat-header">
-              <h3>Canlı Chat</h3>
-              <span className="chat-subtitle">
-                Oturum içi yazılı iletişim ve kısa notlar için kullanın.
-              </span>
-            </div>
-
-            <div className="chat-messages">
-              {chatMessages.length === 0 && (
-                <div className="chat-empty">
-                  Henüz mesaj yok. Aşağıdan mesaj yazarak başlayabilirsiniz.
-                </div>
-              )}
-              {chatMessages.map((m) => (
-                <div
-                  key={m.id}
-                  className={
-                    m.from === "HOST"
-                      ? "chat-bubble chat-bubble--host"
-                      : "chat-bubble chat-bubble--viewer"
-                  }
-                >
-                  <span className="chat-author">
-                    {m.from === "HOST" ? "Destek alan" : "Destek veren"}
-                  </span>
-                  <span className="chat-text">{m.text}</span>
-                </div>
-              ))}
-            </div>
-
-            <div className="chat-input-row">
-              <input
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={handleChatKeyDown}
-                placeholder="Mesaj yazın ve Enter’a basın..."
-                className="chat-input"
-              />
-              <button className="btn-primary btn-primary--small" onClick={sendChat}>
-                Gönder
+          <div className="card">
+            <div className="screen-header">
+              <div>
+                <h3>Karşı tarafın ekranı</h3>
+                <p className="screen-sub">
+                  Destek veren olarak bu alan üzerine tıklayıp kırmızı imleç ile yönlendirme yapabilirsiniz.
+                </p>
+              </div>
+              <button
+                className="link-button"
+                onClick={() => setRemoteFull((v) => !v)}
+              >
+                {remoteFull ? "Normal" : "Büyüt"}
               </button>
+            </div>
+            <div
+              className={`screen-wrapper ${remoteFull ? "full" : ""}`}
+              onClick={handleRemoteScreenClick}
+            >
+              <video
+                ref={remoteVideoRef}
+                className="screen-video"
+                autoPlay
+                muted
+                playsInline
+              />
+              <div ref={pointerRef} className="remote-pointer" />
+            </div>
+          </div>
+
+          <div className="card chat-card">
+            <h3>Canlı Chat</h3>
+            <div className="chat-box">
+              <div className="chat-messages">
+                {chatMessages.length === 0 && (
+                  <div className="chat-placeholder">
+                    İlk mesajı siz yazın. Örneğin:{" "}
+                    <em>“Merhaba, ekranınızı görebiliyorum.”</em>
+                  </div>
+                )}
+                {chatMessages.map((m) => (
+                  <div
+                    key={m.id}
+                    className={`chat-message ${
+                      m.from === "Destek veren" ? "from-support" : "from-client"
+                    }`}
+                  >
+                    <div className="chat-meta">
+                      <span className="chat-from">{m.from}</span>
+                      <span className="chat-time">
+                        {new Date(m.ts).toLocaleTimeString("tr-TR", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                    </div>
+                    <div className="chat-text">{m.text}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="chat-input-row">
+                <input
+                  className="chat-input"
+                  placeholder="Mesaj yazın ve Enter'a basın…"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={handleChatKeyDown}
+                />
+                <button className="btn primary small" onClick={sendChatMessage}>
+                  Gönder
+                </button>
+              </div>
             </div>
           </div>
         </section>
       </main>
 
-      {/* FOOTER */}
       <footer className="app-footer">
-        <span>© {new Date().getFullYear()} uzakyardim · Web tabanlı uzak destek çözümü</span>
-        <span className="footer-hint">
-          Bu sayfa test ve demo amaçlıdır. Gerçek müşteri verisi saklanmaz.
-        </span>
+        <span>© {new Date().getFullYear()} Uzakyardım. Sadece test ve demo amaçlıdır.</span>
       </footer>
     </div>
   );
-};
+}
 
 export default RemoteHelp;
