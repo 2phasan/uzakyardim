@@ -1,0 +1,13 @@
+{
+  "name": "uzakyardim-agent",
+  "version": "1.0.0",
+  "description": "Uzakyardim masaustu agent",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "electron": "^34.0.0",
+    "socket.io-client": "^4.8.0"
+  }
+}

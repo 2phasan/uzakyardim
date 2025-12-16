@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Uzakyardim Agent</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+          "Segoe UI", sans-serif;
+        background: #020617;
+        color: #e5e7eb;
+      }
+      .wrapper {
+        padding: 14px 16px 16px;
+      }
+      .header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 16px;
+      }
+      .logo {
+        width: 26px;
+        height: 26px;
+        border-radius: 8px;
+        background: linear-gradient(135deg, #4f46e5, #0ea5e9);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        color: white;
+        font-size: 15px;
+      }
+      .title-block {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .title {
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .subtitle {
+        font-size: 11px;
+        color: #9ca3af;
+      }
+
+      .field-label {
+        font-size: 11px;
+        color: #9ca3af;
+        margin-bottom: 4px;
+      }
+      .room-row {
+        margin-bottom: 10px;
+      }
+      .room-input-row {
+        display: flex;
+        gap: 6px;
+      }
+      #roomIdInput {
+        flex: 1;
+        padding: 7px 8px;
+        border-radius: 8px;
+        border: 1px solid #4b5563;
+        background: #020617;
+        color: #e5e7eb;
+        font-size: 13px;
+      }
+      #roomIdInput:focus {
+        outline: none;
+        border-color: #6366f1;
+      }
+      button {
+        border-radius: 999px;
+        border: 1px solid transparent;
+        padding: 6px 12px;
+        font-size: 12px;
+        cursor: pointer;
+        font-weight: 500;
+        background: #111827;
+        color: #e5e7eb;
+      }
+      button.primary {
+        background: linear-gradient(135deg, #4f46e5, #0ea5e9);
+        color: white;
+        border-color: rgba(129, 140, 248, 0.8);
+      }
+      button.primary:disabled,
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      button + button {
+        margin-left: 4px;
+      }
+
+      .status-box {
+        margin-top: 8px;
+        padding: 6px 8px;
+        border-radius: 8px;
+        background: #020617;
+        border: 1px solid #374151;
+        font-size: 11px;
+        height: 70px;
+        overflow-y: auto;
+      }
+      .status-line {
+        margin-bottom: 2px;
+      }
+      .status-line.system {
+        color: #9ca3af;
+      }
+      .status-line.ok {
+        color: #22c55e;
+      }
+      .status-line.error {
+        color: #f97373;
+      }
+
+      .hint {
+        margin-top: 8px;
+        font-size: 11px;
+        color: #9ca3af;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrapper">
+      <div class="header">
+        <div class="logo">U</div>
+        <div class="title-block">
+          <div class="title">Uzakyardim Agent</div>
+          <div class="subtitle">Müşteri bilgisayarında çalışan masaüstü uygulama</div>
+        </div>
+      </div>
+
+      <div class="room-row">
+        <div class="field-label">Oda ID</div>
+        <div class="room-input-row">
+          <input id="roomIdInput" placeholder="Örn: 123456" />
+          <button id="connectBtn" class="primary">Bağlan</button>
+          <button id="disconnectBtn" disabled>Kes</button>
+        </div>
+      </div>
+
+      <div class="field-label">Durum ve kayıt</div>
+      <div id="statusBox" class="status-box"></div>
+
+      <div class="hint">
+        • Bu agent, sadece aynı oda ID ile bağlanmış web arayüzüne sinyaller gönderir.<br />
+        • İlerleyen adımlarda ekran paylaşımı, mouse/klavye ve dosya aktarma
+        yetkileri buradan yönetilecek.
+      </div>
+    </div>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>
